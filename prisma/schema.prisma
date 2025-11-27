@@ -1,0 +1,396 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// AUTHENTICATION & USERS
+// ============================================
+
+enum UserRole {
+  DOCTOR
+  ASSISTANT
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String
+  role          UserRole  @default(ASSISTANT)
+  phone         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  consultations Consultation[]
+  invoices      Invoice[]
+  expenses      Expense[]
+
+  @@map("users")
+}
+
+// ============================================
+// PATIENT MANAGEMENT
+// ============================================
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+model Patient {
+  id              String        @id @default(cuid())
+  firstName       String
+  lastName        String
+  dateOfBirth     DateTime?
+  gender          Gender?
+  phone           String
+  phoneSecondary  String?
+  email           String?
+  address         String?
+  city            String?
+  maritalStatus   MaritalStatus?
+  occupation      String?
+  
+  // Medical Information
+  bloodType       String?
+  allergies       String?       // Comma-separated or text
+  chronicDiseases String?       // Comma-separated or text
+  currentMedications String?
+  familyHistory   String?
+  notes           String?       // Internal notes
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  appointments    Appointment[]
+  consultations   Consultation[]
+  invoices        Invoice[]
+  attachments     Attachment[]
+
+  @@index([lastName, firstName])
+  @@index([phone])
+  @@map("patients")
+}
+
+model Attachment {
+  id          String   @id @default(cuid())
+  patientId   String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  fileName    String
+  fileType    String   // pdf, image, etc.
+  fileSize    Int
+  fileUrl     String   // URL to the stored file
+  description String?
+  category    String?  // lab_result, radiology, other
+  
+  uploadedAt  DateTime @default(now())
+
+  @@index([patientId])
+  @@map("attachments")
+}
+
+// ============================================
+// APPOINTMENT MANAGEMENT
+// ============================================
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Appointment {
+  id          String            @id @default(cuid())
+  patientId   String
+  patient     Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  dateTime    DateTime
+  duration    Int               @default(30) // Duration in minutes
+  status      AppointmentStatus @default(SCHEDULED)
+  type        String?           // consultation, follow-up, emergency, etc.
+  reason      String?           // Reason for visit
+  notes       String?           // Additional notes
+  
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relation to consultation (one appointment can lead to one consultation)
+  consultation Consultation?
+
+  @@index([patientId])
+  @@index([dateTime])
+  @@index([status])
+  @@map("appointments")
+}
+
+// ============================================
+// CONSULTATION / MEDICAL RECORDS
+// ============================================
+
+model Consultation {
+  id            String       @id @default(cuid())
+  patientId     String
+  patient       Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  appointmentId String?      @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  
+  doctorId      String
+  doctor        User         @relation(fields: [doctorId], references: [id])
+  
+  date          DateTime     @default(now())
+  
+  // Vital Signs
+  weight        Float?       // in kg
+  height        Float?       // in cm
+  bloodPressure String?      // e.g., "120/80"
+  heartRate     Int?         // bpm
+  temperature   Float?       // in °C
+  
+  // Clinical Information
+  chiefComplaint    String?  // Main reason for visit
+  symptoms          String?
+  physicalExam      String?  // Physical examination findings
+  diagnosis         String?
+  differentialDiagnosis String?
+  treatmentPlan     String?
+  recommendations   String?
+  followUpDate      DateTime?
+  notes             String?
+  
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Relations
+  prescriptions Prescription[]
+  invoice       Invoice?
+
+  @@index([patientId])
+  @@index([date])
+  @@map("consultations")
+}
+
+// ============================================
+// PRESCRIPTIONS
+// ============================================
+
+model Prescription {
+  id              String       @id @default(cuid())
+  consultationId  String
+  consultation    Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  
+  date            DateTime     @default(now())
+  notes           String?      // General prescription notes
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  medications     PrescriptionMedication[]
+
+  @@index([consultationId])
+  @@map("prescriptions")
+}
+
+model PrescriptionMedication {
+  id              String       @id @default(cuid())
+  prescriptionId  String
+  prescription    Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  
+  name            String       // Medication name
+  dosage          String?      // e.g., "500mg"
+  frequency       String?      // e.g., "3 fois par jour"
+  duration        String?      // e.g., "7 jours"
+  instructions    String?      // e.g., "Prendre après les repas"
+  quantity        Int?         // Number of units/boxes
+  
+  @@index([prescriptionId])
+  @@map("prescription_medications")
+}
+
+// ============================================
+// BILLING & INVOICES
+// ============================================
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  CHECK
+  OTHER
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  price       Float
+  duration    Int?     // Default duration in minutes
+  isActive    Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  invoiceItems InvoiceItem[]
+
+  @@map("services")
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique
+  
+  patientId       String
+  patient         Patient       @relation(fields: [patientId], references: [id])
+  
+  consultationId  String?       @unique
+  consultation    Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  
+  createdById     String
+  createdBy       User          @relation(fields: [createdById], references: [id])
+  
+  date            DateTime      @default(now())
+  dueDate         DateTime?
+  
+  subtotal        Float
+  discount        Float         @default(0)
+  tax             Float         @default(0)
+  total           Float
+  
+  amountPaid      Float         @default(0)
+  paymentStatus   PaymentStatus @default(PENDING)
+  paymentMethod   PaymentMethod?
+  paymentDate     DateTime?
+  
+  notes           String?
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  items           InvoiceItem[]
+
+  @@index([patientId])
+  @@index([date])
+  @@index([paymentStatus])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  serviceId   String?
+  service     Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Float
+  total       Float
+  
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+// ============================================
+// EXPENSE TRACKING
+// ============================================
+
+enum ExpenseCategory {
+  RENT
+  UTILITIES
+  SUPPLIES
+  MEDICATIONS
+  EQUIPMENT
+  SALARY
+  MAINTENANCE
+  INSURANCE
+  TAXES
+  OTHER
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  
+  createdById String
+  createdBy   User            @relation(fields: [createdById], references: [id])
+  
+  date        DateTime        @default(now())
+  category    ExpenseCategory
+  description String
+  amount      Float
+  vendor      String?         // Supplier/vendor name
+  receiptUrl  String?         // URL to receipt image/pdf
+  notes       String?
+  
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([date])
+  @@index([category])
+  @@map("expenses")
+}
+
+// ============================================
+// CLINIC SETTINGS
+// ============================================
+
+model ClinicSettings {
+  id              String   @id @default("clinic_settings")
+  
+  clinicName      String   @default("Cabinet Médical")
+  doctorName      String   @default("")
+  specialty       String   @default("Médecine Générale")
+  phone           String   @default("")
+  email           String?
+  address         String   @default("")
+  city            String   @default("El Attaouia")
+  
+  // Working Hours (JSON stored as string)
+  workingHours    String?  // JSON: {"monday": {"start": "09:00", "end": "18:00"}, ...}
+  
+  // Consultation defaults
+  defaultConsultationDuration Int @default(30)
+  defaultConsultationPrice    Float @default(100)
+  
+  // Invoice settings
+  invoicePrefix   String   @default("FAC")
+  invoiceFooter   String?  // Text to show at bottom of invoices
+  
+  // Logo
+  logoUrl         String?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("clinic_settings")
+}
